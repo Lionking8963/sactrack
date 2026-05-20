@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1e293b">
+<title>SacTrack</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/svg+xml" href="icon.svg">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; font-family: -apple-system, system-ui, sans-serif; background: #0f172a; color: #f1f5f9; user-select: none; }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+  header { display: flex; align-items: center; padding: 10px 14px; background: #1e293b; border-bottom: 1px solid #334155; gap: 8px; }
+  header h1 { font-size: 18px; flex: 1; }
+  header .count { font-size: 14px; color: #94a3b8; }
+  header .sync-dot { width: 10px; height: 10px; border-radius: 50%; background: #64748b; }
+  header .sync-dot.online { background: #22c55e; }
+  header .sync-dot.pending { background: #eab308; animation: pulse 1s infinite; }
+  header .sync-dot.error { background: #ef4444; }
+  @keyframes pulse { 50% { opacity: 0.3; } }
+  nav { display: flex; background: #1e293b; border-bottom: 1px solid #334155; }
+  nav button { flex: 1; padding: 14px; background: none; border: none; color: #94a3b8; font-size: 15px; font-weight: 600; cursor: pointer; }
+  nav button.active { color: #f1f5f9; border-bottom: 3px solid #3b82f6; }
+  main { flex: 1; overflow-y: auto; padding: 12px; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* Régions grid - écran chargement */
+  .regions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .region-btn { padding: 22px 12px; border-radius: 12px; border: none; color: white; font-size: 18px; font-weight: 700; cursor: pointer; position: relative; min-height: 90px; box-shadow: 0 4px 8px rgba(0,0,0,0.3); }
+  .region-btn:active { transform: scale(0.97); }
+  .region-btn .badge { position: absolute; top: 6px; right: 8px; background: rgba(0,0,0,0.4); padding: 3px 8px; border-radius: 10px; font-size: 13px; font-weight: 600; }
+  .add-region { background: #334155; color: #94a3b8; border: 2px dashed #475569; }
+
+  /* Liste sacs - écran déchargement */
+  .region-filter { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 10px; margin-bottom: 8px; }
+  .region-filter button { flex-shrink: 0; padding: 8px 14px; border-radius: 18px; border: none; color: white; font-size: 13px; font-weight: 600; cursor: pointer; opacity: 0.6; }
+  .region-filter button.active { opacity: 1; box-shadow: 0 0 0 2px white; }
+  .bags-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .bag-card { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: #1e293b; cursor: pointer; }
+  .bag-card img { width: 100%; height: 100%; object-fit: cover; }
+  .bag-card .region-dot { position: absolute; top: 4px; left: 4px; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; }
+  .bag-card .check { position: absolute; bottom: 4px; right: 4px; width: 24px; height: 24px; background: rgba(0,0,0,0.5); border: 2px solid white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; color: white; }
+  .bag-card.selected { box-shadow: 0 0 0 3px #22c55e; }
+  .bag-card.selected .check { background: #22c55e; }
+  .bag-card.selected .check::after { content: '✓'; color: white; font-size: 16px; }
+
+  /* Bouton flottant */
+  .fab { position: fixed; bottom: 20px; right: 20px; width: 64px; height: 64px; border-radius: 50%; background: #22c55e; color: white; border: none; font-size: 28px; font-weight: bold; box-shadow: 0 6px 16px rgba(0,0,0,0.4); cursor: pointer; }
+  .fab:active { transform: scale(0.95); }
+  .fab.danger { background: #ef4444; }
+
+  /* Modal */
+  .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 100; align-items: center; justify-content: center; padding: 16px; }
+  .modal.show { display: flex; }
+  .modal-content { background: #1e293b; border-radius: 16px; padding: 20px; width: 100%; max-width: 420px; max-height: 90vh; overflow-y: auto; }
+  .modal-content h2 { margin-bottom: 14px; font-size: 18px; }
+  .modal-content label { display: block; margin: 10px 0 4px; font-size: 13px; color: #94a3b8; }
+  .modal-content input, .modal-content select { width: 100%; padding: 10px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: #f1f5f9; font-size: 15px; }
+  .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+  .modal-actions button { flex: 1; padding: 12px; border-radius: 8px; border: none; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .btn-primary { background: #3b82f6; color: white; }
+  .btn-secondary { background: #334155; color: #f1f5f9; }
+  .btn-danger { background: #ef4444; color: white; }
+
+  /* Color picker */
+  .color-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin: 8px 0; }
+  .color-swatch { aspect-ratio: 1; border-radius: 8px; border: 3px solid transparent; cursor: pointer; }
+  .color-swatch.selected { border-color: white; }
+
+  /* CAPTURE écran continu */
+  #capture-view { position: fixed; inset: 0; background: black; z-index: 200; display: none; flex-direction: column; }
+  #capture-view.show { display: flex; }
+  #video { flex: 1; width: 100%; object-fit: cover; background: black; }
+  #capture-top-bar { position: absolute; top: 0; left: 0; right: 0; padding: 12px; display: flex; gap: 10px; align-items: center; background: linear-gradient(180deg, rgba(0,0,0,0.6), transparent); z-index: 2; }
+  #capture-top-bar .btn-close-cam { background: rgba(0,0,0,0.5); color: white; border: none; padding: 10px 14px; border-radius: 8px; font-size: 18px; cursor: pointer; }
+  #capture-top-bar .session-counter { flex: 1; text-align: center; color: white; font-size: 16px; font-weight: 600; text-shadow: 0 1px 4px rgba(0,0,0,0.8); }
+  #capture-top-bar .label-toggle { background: rgba(0,0,0,0.5); color: white; border: 2px solid transparent; padding: 8px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  #capture-top-bar .label-toggle.active { background: #fbbf24; color: #1e293b; border-color: white; }
+
+  #capture-region-strip { background: rgba(0,0,0,0.7); padding: 8px; display: flex; gap: 6px; overflow-x: auto; }
+  #capture-region-strip::-webkit-scrollbar { display: none; }
+  #capture-region-strip .region-pill { flex-shrink: 0; padding: 8px 14px; border-radius: 18px; border: 3px solid transparent; color: white; font-size: 14px; font-weight: 700; cursor: pointer; opacity: 0.55; min-width: 70px; text-align: center; }
+  #capture-region-strip .region-pill.active { opacity: 1; border-color: white; }
+
+  #capture-bottom { background: #0f172a; padding: 16px; display: flex; align-items: center; justify-content: center; gap: 16px; }
+  .btn-capture { width: 76px; height: 76px; border-radius: 50%; background: white; border: 5px solid #334155; cursor: pointer; }
+  .btn-capture:active { transform: scale(0.93); }
+  .btn-capture.label-mode { border-color: #fbbf24; background: #fef3c7; }
+
+  /* Flash visuel */
+  #flash { position: fixed; inset: 0; background: white; opacity: 0; pointer-events: none; z-index: 250; }
+  #flash.flash { animation: flash 0.25s ease-out; }
+  @keyframes flash { 0% { opacity: 0.85; } 100% { opacity: 0; } }
+
+  /* Empty state */
+  .empty { text-align: center; padding: 60px 20px; color: #64748b; }
+  .empty h3 { margin-bottom: 8px; color: #94a3b8; }
+
+  .photo-preview { max-width: 100%; max-height: 80vh; border-radius: 8px; }
+
+  /* Toast */
+  #toast { position: fixed; bottom: 100px; left: 50%; transform: translateX(-50%); background: #22c55e; color: white; padding: 12px 20px; border-radius: 24px; font-weight: 600; z-index: 300; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  #toast.error { background: #ef4444; }
+
+  /* Section settings */
+  .settings-section { background: #1e293b; padding: 14px; border-radius: 10px; margin-bottom: 12px; }
+  .settings-section h3 { font-size: 15px; margin-bottom: 10px; color: #94a3b8; }
+  .full-btn { width: 100%; padding: 12px; border-radius: 8px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+  .info-line { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; color: #94a3b8; }
+  .info-line span:last-child { color: #f1f5f9; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header>
+    <h1>SacTrack</h1>
+    <span class="count" id="total-count">0 sacs</span>
+    <div class="sync-dot" id="sync-dot" title="Statut sync"></div>
+  </header>
+
+  <nav>
+    <button data-view="load" class="active">📥 Chargement</button>
+    <button data-view="unload">📤 Déchargement</button>
+    <button data-view="settings">⚙️</button>
+  </nav>
+
+  <main>
+    <section id="view-load" class="view active">
+      <div class="regions-grid" id="regions-grid"></div>
+    </section>
+
+    <section id="view-unload" class="view">
+      <div class="region-filter" id="region-filter"></div>
+      <div class="bags-grid" id="bags-grid"></div>
+      <div class="empty" id="bags-empty" style="display:none;">
+        <h3>Aucun sac</h3>
+        <p>Sélectionne une région ou ajoute des sacs en mode Chargement</p>
+      </div>
+    </section>
+
+    <section id="view-settings" class="view">
+      <div class="settings-section">
+        <h3>RÉGIONS</h3>
+        <div id="regions-list"></div>
+        <button class="btn-primary full-btn" onclick="openRegionModal()">+ Ajouter une région</button>
+      </div>
+
+      <div class="settings-section">
+        <h3>SYNCHRO GOOGLE SHEETS</h3>
+        <div class="info-line"><span>État</span><span id="sync-state">Désactivée</span></div>
+        <div class="info-line"><span>Sacs en attente</span><span id="sync-queue-count">0</span></div>
+        <div class="info-line"><span>Dernière sync</span><span id="sync-last">—</span></div>
+        <label style="display:block;margin-top:8px;font-size:13px;color:#94a3b8;">URL du webhook Google Apps Script</label>
+        <input type="text" id="webhook-url" placeholder="https://script.google.com/macros/s/..../exec" style="width:100%;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#f1f5f9;font-size:13px;margin-top:4px;">
+        <label style="display:block;margin-top:8px;font-size:13px;color:#94a3b8;">Nom de cet appareil</label>
+        <input type="text" id="device-name" placeholder="ex. Tel-1" style="width:100%;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#f1f5f9;font-size:13px;margin-top:4px;">
+        <button class="btn-primary full-btn" onclick="saveSyncSettings()">Enregistrer</button>
+        <button class="btn-secondary full-btn" onclick="flushQueue(true)">🔄 Synchroniser maintenant</button>
+        <button class="btn-secondary full-btn" onclick="testWebhook()">🧪 Tester la connexion</button>
+      </div>
+
+      <div class="settings-section">
+        <h3>DONNÉES</h3>
+        <button class="btn-secondary full-btn" onclick="exportData()">📥 Exporter en JSON</button>
+        <button class="btn-danger full-btn" onclick="confirmWipe()">🗑️ Effacer tous les sacs</button>
+      </div>
+
+      <p style="margin-top:24px;color:#64748b;font-size:12px;text-align:center;">SacTrack v2 — local + Google Sheets</p>
+    </section>
+  </main>
+</div>
+
+<button class="fab danger" id="fab-validate" style="display:none;" onclick="validateUnload()">✓</button>
+
+<!-- CAPTURE EN CONTINU -->
+<div id="capture-view">
+  <video id="video" autoplay playsinline muted></video>
+
+  <div id="capture-top-bar">
+    <button class="btn-close-cam" onclick="cancelCapture()">✕</button>
+    <div class="session-counter" id="session-counter">0 sac · session</div>
+    <button class="label-toggle" id="label-toggle" onclick="toggleLabelMode()">📋 Étiquette</button>
+  </div>
+
+  <div id="capture-region-strip"></div>
+
+  <div id="capture-bottom">
+    <button class="btn-capture" id="btn-capture" onclick="takePhoto()"></button>
+  </div>
+</div>
+
+<div id="flash"></div>
+
+<!-- MODAL RÉGION -->
+<div class="modal" id="region-modal">
+  <div class="modal-content">
+    <h2 id="region-modal-title">Nouvelle région</h2>
+    <label>Nom</label>
+    <input type="text" id="region-name" placeholder="ex. Paris">
+    <label>Couleur</label>
+    <div class="color-grid" id="color-grid"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeRegionModal()">Annuler</button>
+      <button class="btn-danger" id="region-delete-btn" style="display:none;" onclick="deleteRegion()">Suppr.</button>
+      <button class="btn-primary" onclick="saveRegion()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL DÉTAIL SAC -->
+<div class="modal" id="bag-detail-modal">
+  <div class="modal-content">
+    <h2>Sac</h2>
+    <img class="photo-preview" id="detail-photo">
+    <div id="detail-info" style="margin-top:10px;font-size:13px;color:#94a3b8;"></div>
+    <img class="photo-preview" id="detail-label-photo" style="margin-top:10px;display:none;">
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="closeBagDetail()">Fermer</button>
+      <button class="btn-danger" onclick="deleteBagFromDetail()">Supprimer</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ========== BASE DE DONNÉES ==========
+const DB_NAME = 'sactrack';
+const DB_VERSION = 2;
+let db;
+
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains('bags')) {
+        const s = d.createObjectStore('bags', { keyPath: 'id', autoIncrement: true });
+        s.createIndex('region', 'regionId', { unique: false });
+        s.createIndex('createdAt', 'createdAt', { unique: false });
+      }
+      if (!d.objectStoreNames.contains('regions')) {
+        d.createObjectStore('regions', { keyPath: 'id', autoIncrement: true });
+      }
+      if (!d.objectStoreNames.contains('syncQueue')) {
+        d.createObjectStore('syncQueue', { keyPath: 'id', autoIncrement: true });
+      }
+      if (!d.objectStoreNames.contains('settings')) {
+        d.createObjectStore('settings', { keyPath: 'key' });
+      }
+    };
+    req.onsuccess = (e) => { db = e.target.result; resolve(db); };
+    req.onerror = (e) => reject(e);
+  });
+}
+function tx(store, mode = 'readonly') { return db.transaction(store, mode).objectStore(store); }
+function dbAdd(store, value) { return new Promise((res, rej) => { const r = tx(store, 'readwrite').add(value); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+function dbPut(store, value) { return new Promise((res, rej) => { const r = tx(store, 'readwrite').put(value); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+function dbGet(store, key) { return new Promise((res, rej) => { const r = tx(store).get(key); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+function dbDelete(store, key) { return new Promise((res, rej) => { const r = tx(store, 'readwrite').delete(key); r.onsuccess = () => res(); r.onerror = () => rej(r.error); }); }
+function dbAll(store) { return new Promise((res, rej) => { const r = tx(store).getAll(); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+function dbClear(store) { return new Promise((res, rej) => { const r = tx(store, 'readwrite').clear(); r.onsuccess = () => res(); r.onerror = () => rej(r.error); }); }
+function dbByIndex(store, indexName, value) { return new Promise((res, rej) => { const r = tx(store).index(indexName).getAll(value); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+function dbCount(store) { return new Promise((res, rej) => { const r = tx(store).count(); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+
+// ========== ÉTAT ==========
+const PALETTE = ['#ef4444','#f97316','#eab308','#22c55e','#14b8a6','#0ea5e9','#6366f1','#a855f7','#ec4899','#f43f5e','#84cc16','#64748b'];
+let regions = [];
+let currentView = 'load';
+let currentFilterRegion = null;
+let selectedBags = new Set();
+let stream = null;
+let editingRegionId = null;
+let pickedColor = PALETTE[0];
+let detailBagId = null;
+
+// Capture continue
+let captureActiveRegionId = null;
+let captureLabelMode = false;
+let captureSessionCount = 0;
+let lastBagIdForLabel = null;
+
+// Sync
+let settings = { webhookUrl: '', deviceName: 'Tel-1', lastSyncAt: null };
+let syncing = false;
+
+// ========== INIT ==========
+async function init() {
+  await openDB();
+  regions = await dbAll('regions');
+  if (regions.length === 0) {
+    const seed = [
+      { name: 'Paris', color: '#ef4444' },
+      { name: 'Lyon', color: '#22c55e' },
+      { name: 'Marseille', color: '#0ea5e9' },
+      { name: 'Bordeaux', color: '#a855f7' }
+    ];
+    for (const r of seed) await dbAdd('regions', r);
+    regions = await dbAll('regions');
+  }
+  await loadSettings();
+  render();
+  setupNav();
+  setupSyncListeners();
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  }
+  // sync auto au démarrage
+  setTimeout(() => flushQueue(false), 1500);
+  // retry périodique tant qu'il y a une queue
+  setInterval(() => flushQueue(false), 30000);
+}
+
+function setupNav() {
+  document.querySelectorAll('nav button').forEach(b => { b.onclick = () => switchView(b.dataset.view); });
+}
+function setupSyncListeners() {
+  window.addEventListener('online', () => { updateSyncDot(); flushQueue(false); });
+  window.addEventListener('offline', updateSyncDot);
+}
+
+function switchView(v) {
+  currentView = v;
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.view === v));
+  document.querySelectorAll('.view').forEach(s => s.classList.remove('active'));
+  document.getElementById('view-' + v).classList.add('active');
+  selectedBags.clear();
+  document.getElementById('fab-validate').style.display = 'none';
+  render();
+}
+
+// ========== RENDER ==========
+async function render() {
+  await refreshTotalCount();
+  updateSyncDot();
+  if (currentView === 'load') await renderLoad();
+  else if (currentView === 'unload') await renderUnload();
+  else if (currentView === 'settings') await renderSettings();
+}
+
+async function refreshTotalCount() {
+  const n = await dbCount('bags');
+  document.getElementById('total-count').textContent = n + ' sac' + (n > 1 ? 's' : '');
+}
+
+async function renderLoad() {
+  const grid = document.getElementById('regions-grid');
+  const all = await dbAll('bags');
+  const counts = {};
+  for (const b of all) counts[b.regionId] = (counts[b.regionId] || 0) + 1;
+  grid.innerHTML = '';
+  for (const r of regions) {
+    const btn = document.createElement('button');
+    btn.className = 'region-btn';
+    btn.style.background = r.color;
+    btn.innerHTML = `<span class="badge">${counts[r.id] || 0}</span>${r.name}`;
+    btn.onclick = () => startCapture(r.id);
+    grid.appendChild(btn);
+  }
+  const add = document.createElement('button');
+  add.className = 'region-btn add-region';
+  add.textContent = '+ Région';
+  add.onclick = () => openRegionModal();
+  grid.appendChild(add);
+}
+
+async function renderUnload() {
+  const filter = document.getElementById('region-filter');
+  const grid = document.getElementById('bags-grid');
+  const empty = document.getElementById('bags-empty');
+  filter.innerHTML = '';
+  const allBtn = document.createElement('button');
+  allBtn.textContent = 'Toutes';
+  allBtn.style.background = '#475569';
+  if (currentFilterRegion === null) allBtn.classList.add('active');
+  allBtn.onclick = () => { currentFilterRegion = null; selectedBags.clear(); renderUnload(); };
+  filter.appendChild(allBtn);
+  const allBags = await dbAll('bags');
+  const counts = {};
+  for (const b of allBags) counts[b.regionId] = (counts[b.regionId] || 0) + 1;
+  for (const r of regions) {
+    const btn = document.createElement('button');
+    btn.textContent = `${r.name} (${counts[r.id] || 0})`;
+    btn.style.background = r.color;
+    if (currentFilterRegion === r.id) btn.classList.add('active');
+    btn.onclick = () => { currentFilterRegion = r.id; selectedBags.clear(); renderUnload(); };
+    filter.appendChild(btn);
+  }
+  const bags = currentFilterRegion === null ? allBags : allBags.filter(b => b.regionId === currentFilterRegion);
+  bags.sort((a, b) => b.createdAt - a.createdAt);
+  grid.innerHTML = '';
+  empty.style.display = bags.length === 0 ? 'block' : 'none';
+  for (const b of bags) {
+    const region = regions.find(r => r.id === b.regionId);
+    const card = document.createElement('div');
+    card.className = 'bag-card';
+    if (selectedBags.has(b.id)) card.classList.add('selected');
+    card.innerHTML = `<img src="${b.photo}" alt=""><div class="region-dot" style="background:${region ? region.color : '#64748b'}"></div><div class="check"></div>`;
+    let longPressTimer;
+    card.addEventListener('touchstart', () => { longPressTimer = setTimeout(() => openBagDetail(b.id), 500); });
+    card.addEventListener('touchend', () => clearTimeout(longPressTimer));
+    card.addEventListener('touchmove', () => clearTimeout(longPressTimer));
+    card.onclick = () => toggleBagSelection(b.id);
+    grid.appendChild(card);
+  }
+  document.getElementById('fab-validate').style.display = selectedBags.size > 0 ? 'flex' : 'none';
+  document.getElementById('fab-validate').innerHTML = '✓ ' + selectedBags.size;
+}
+
+async function renderSettings() {
+  const list = document.getElementById('regions-list');
+  list.innerHTML = '';
+  for (const r of regions) {
+    const div = document.createElement('div');
+    div.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;background:#0f172a;border-radius:8px;margin-bottom:6px;cursor:pointer;';
+    div.innerHTML = `<div style="width:24px;height:24px;border-radius:50%;background:${r.color};"></div><span style="flex:1;">${r.name}</span><span style="color:#64748b;">✏️</span>`;
+    div.onclick = () => openRegionModal(r.id);
+    list.appendChild(div);
+  }
+  document.getElementById('webhook-url').value = settings.webhookUrl || '';
+  document.getElementById('device-name').value = settings.deviceName || '';
+  document.getElementById('sync-state').textContent = settings.webhookUrl ? (navigator.onLine ? 'Activée · en ligne' : 'Activée · hors ligne') : 'Désactivée';
+  const queueN = await dbCount('syncQueue');
+  document.getElementById('sync-queue-count').textContent = queueN;
+  document.getElementById('sync-last').textContent = settings.lastSyncAt ? new Date(settings.lastSyncAt).toLocaleString('fr-FR') : '—';
+}
+
+async function updateSyncDot() {
+  const dot = document.getElementById('sync-dot');
+  dot.className = 'sync-dot';
+  if (!settings.webhookUrl) { dot.classList.add(''); return; }
+  const queueN = await dbCount('syncQueue');
+  if (queueN > 0) dot.classList.add('pending');
+  else if (navigator.onLine) dot.classList.add('online');
+  else dot.classList.add('error');
+}
+
+// ========== CAPTURE EN CONTINU ==========
+async function startCapture(regionId) {
+  captureActiveRegionId = regionId;
+  captureLabelMode = false;
+  captureSessionCount = 0;
+  lastBagIdForLabel = null;
+  updateCaptureUI();
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 1280 } },
+      audio: false
+    });
+    document.getElementById('video').srcObject = stream;
+    document.getElementById('capture-view').classList.add('show');
+  } catch (e) {
+    toast('Caméra indisponible : ' + e.message, true);
+  }
+}
+
+function updateCaptureUI() {
+  const strip = document.getElementById('capture-region-strip');
+  strip.innerHTML = '';
+  for (const r of regions) {
+    const p = document.createElement('div');
+    p.className = 'region-pill';
+    if (r.id === captureActiveRegionId) p.classList.add('active');
+    p.style.background = r.color;
+    p.textContent = r.name;
+    p.onclick = () => { captureActiveRegionId = r.id; captureLabelMode = false; updateCaptureUI(); };
+    strip.appendChild(p);
+  }
+  document.getElementById('session-counter').textContent = `${captureSessionCount} sac${captureSessionCount > 1 ? 's' : ''} · session`;
+  const lt = document.getElementById('label-toggle');
+  lt.classList.toggle('active', captureLabelMode);
+  lt.style.display = lastBagIdForLabel ? 'block' : 'none';
+  document.getElementById('btn-capture').classList.toggle('label-mode', captureLabelMode);
+}
+
+function toggleLabelMode() {
+  if (!lastBagIdForLabel) { toast('Prends d\'abord un sac', true); return; }
+  captureLabelMode = !captureLabelMode;
+  updateCaptureUI();
+}
+
+function cancelCapture() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  document.getElementById('capture-view').classList.remove('show');
+  stream = null;
+  if (captureSessionCount > 0) toast(`Session : ${captureSessionCount} sac(s) ajouté(s)`);
+  render();
+}
+
+function flashScreen() {
+  const f = document.getElementById('flash');
+  f.classList.remove('flash');
+  void f.offsetWidth;
+  f.classList.add('flash');
+}
+
+async function takePhoto() {
+  if (!stream) return;
+  const video = document.getElementById('video');
+  if (!video.videoWidth) return;
+  const canvas = document.createElement('canvas');
+  const maxW = 1000;
+  const scale = Math.min(1, maxW / video.videoWidth);
+  canvas.width = video.videoWidth * scale;
+  canvas.height = video.videoHeight * scale;
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+  flashScreen();
+  // vibration courte si supportée
+  if (navigator.vibrate) navigator.vibrate(40);
+
+  if (captureLabelMode && lastBagIdForLabel) {
+    const bag = await dbGet('bags', lastBagIdForLabel);
+    if (bag) {
+      bag.labelPhoto = dataUrl;
+      await dbPut('bags', bag);
+      await queueEvent('label_added', bag);
+    }
+    captureLabelMode = false;
+    updateCaptureUI();
+  } else {
+    const bag = {
+      regionId: captureActiveRegionId,
+      photo: dataUrl,
+      labelPhoto: null,
+      createdAt: Date.now(),
+      device: settings.deviceName || 'unknown'
+    };
+    const id = await dbAdd('bags', bag);
+    bag.id = id;
+    lastBagIdForLabel = id;
+    captureSessionCount++;
+    await queueEvent('load', bag);
+    updateCaptureUI();
+  }
+  flushQueue(false);
+}
+
+// ========== DÉCHARGEMENT ==========
+function toggleBagSelection(id) {
+  if (selectedBags.has(id)) selectedBags.delete(id);
+  else selectedBags.add(id);
+  renderUnload();
+}
+async function validateUnload() {
+  if (selectedBags.size === 0) return;
+  if (!confirm(`Décharger ${selectedBags.size} sac(s) ?`)) return;
+  for (const id of selectedBags) {
+    const bag = await dbGet('bags', id);
+    if (bag) {
+      await queueEvent('unload', bag);
+      await dbDelete('bags', id);
+    }
+  }
+  toast(selectedBags.size + ' sac(s) déchargé(s)');
+  selectedBags.clear();
+  render();
+  flushQueue(false);
+}
+
+// ========== DÉTAIL ==========
+async function openBagDetail(id) {
+  const b = await dbGet('bags', id);
+  if (!b) return;
+  detailBagId = id;
+  const r = regions.find(x => x.id === b.regionId);
+  document.getElementById('detail-photo').src = b.photo;
+  document.getElementById('detail-info').textContent = `${r ? r.name : '?'} — ${new Date(b.createdAt).toLocaleString('fr-FR')}`;
+  const lp = document.getElementById('detail-label-photo');
+  if (b.labelPhoto) { lp.src = b.labelPhoto; lp.style.display = 'block'; } else { lp.style.display = 'none'; }
+  document.getElementById('bag-detail-modal').classList.add('show');
+}
+function closeBagDetail() { document.getElementById('bag-detail-modal').classList.remove('show'); detailBagId = null; }
+async function deleteBagFromDetail() {
+  if (detailBagId && confirm('Supprimer ce sac ?')) {
+    const bag = await dbGet('bags', detailBagId);
+    if (bag) await queueEvent('delete', bag);
+    await dbDelete('bags', detailBagId);
+    closeBagDetail();
+    toast('Sac supprimé');
+    render();
+    flushQueue(false);
+  }
+}
+
+// ========== RÉGIONS ==========
+function openRegionModal(id = null) {
+  editingRegionId = id;
+  const grid = document.getElementById('color-grid');
+  grid.innerHTML = '';
+  PALETTE.forEach(c => {
+    const s = document.createElement('div');
+    s.className = 'color-swatch';
+    s.style.background = c;
+    s.dataset.color = c;
+    s.onclick = () => { pickedColor = c; document.querySelectorAll('.color-swatch').forEach(x => x.classList.remove('selected')); s.classList.add('selected'); };
+    grid.appendChild(s);
+  });
+  if (id) {
+    const r = regions.find(x => x.id === id);
+    document.getElementById('region-modal-title').textContent = 'Modifier ' + r.name;
+    document.getElementById('region-name').value = r.name;
+    pickedColor = r.color;
+    document.getElementById('region-delete-btn').style.display = 'block';
+  } else {
+    document.getElementById('region-modal-title').textContent = 'Nouvelle région';
+    document.getElementById('region-name').value = '';
+    pickedColor = PALETTE[regions.length % PALETTE.length];
+    document.getElementById('region-delete-btn').style.display = 'none';
+  }
+  document.querySelectorAll('.color-swatch').forEach(s => { if (s.dataset.color === pickedColor) s.classList.add('selected'); });
+  document.getElementById('region-modal').classList.add('show');
+}
+function closeRegionModal() { document.getElementById('region-modal').classList.remove('show'); editingRegionId = null; }
+async function saveRegion() {
+  const name = document.getElementById('region-name').value.trim();
+  if (!name) { toast('Nom requis', true); return; }
+  if (editingRegionId) {
+    const r = regions.find(x => x.id === editingRegionId);
+    r.name = name; r.color = pickedColor;
+    await dbPut('regions', r);
+  } else {
+    const id = await dbAdd('regions', { name, color: pickedColor });
+    regions.push({ id, name, color: pickedColor });
+  }
+  regions = await dbAll('regions');
+  closeRegionModal();
+  render();
+}
+async function deleteRegion() {
+  if (!editingRegionId) return;
+  const bags = await dbByIndex('bags', 'region', editingRegionId);
+  if (bags.length > 0) {
+    if (!confirm(`Cette région contient ${bags.length} sac(s). Supprimer la région ET les sacs ?`)) return;
+    for (const b of bags) await dbDelete('bags', b.id);
+  } else {
+    if (!confirm('Supprimer cette région ?')) return;
+  }
+  await dbDelete('regions', editingRegionId);
+  regions = await dbAll('regions');
+  closeRegionModal();
+  render();
+}
+
+// ========== SYNC GOOGLE SHEETS ==========
+async function loadSettings() {
+  const s = await dbGet('settings', 'sync');
+  if (s) settings = { ...settings, ...s.value };
+}
+async function persistSettings() {
+  await dbPut('settings', { key: 'sync', value: settings });
+}
+
+async function saveSyncSettings() {
+  settings.webhookUrl = document.getElementById('webhook-url').value.trim();
+  settings.deviceName = document.getElementById('device-name').value.trim() || 'Tel-1';
+  await persistSettings();
+  toast('Réglages sauvegardés');
+  render();
+  if (settings.webhookUrl) flushQueue(true);
+}
+
+async function testWebhook() {
+  if (!settings.webhookUrl) { toast('URL manquante', true); return; }
+  toast('Test en cours...');
+  try {
+    const resp = await fetch(settings.webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ test: true, device: settings.deviceName, timestamp: Date.now() })
+    });
+    const text = await resp.text();
+    if (resp.ok && text.includes('ok')) toast('✓ Webhook fonctionne');
+    else toast('Réponse inattendue : ' + text.slice(0, 60), true);
+  } catch (e) {
+    toast('Erreur : ' + e.message, true);
+  }
+}
+
+async function queueEvent(eventType, bag) {
+  const region = regions.find(r => r.id === bag.regionId);
+  const event = {
+    timestamp: bag.createdAt || Date.now(),
+    eventTime: Date.now(),
+    event: eventType,
+    bagId: bag.id,
+    regionId: bag.regionId,
+    regionName: region ? region.name : '?',
+    regionColor: region ? region.color : '',
+    hasLabel: !!bag.labelPhoto,
+    device: bag.device || settings.deviceName || 'unknown'
+  };
+  await dbAdd('syncQueue', event);
+  updateSyncDot();
+}
+
+async function flushQueue(manual) {
+  if (syncing) return;
+  if (!settings.webhookUrl) { if (manual) toast('Configure d\'abord l\'URL du webhook', true); return; }
+  if (!navigator.onLine) { if (manual) toast('Hors ligne', true); return; }
+  const queue = await dbAll('syncQueue');
+  if (queue.length === 0) { if (manual) toast('Rien à synchroniser'); return; }
+  syncing = true;
+  updateSyncDot();
+  try {
+    const resp = await fetch(settings.webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ events: queue.map(e => ({ ...e, _qid: undefined })) })
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const text = await resp.text();
+    if (!text.includes('ok')) throw new Error('Réponse invalide : ' + text.slice(0,80));
+    // succès : on vide les events envoyés
+    for (const e of queue) await dbDelete('syncQueue', e.id);
+    settings.lastSyncAt = Date.now();
+    await persistSettings();
+    if (manual) toast(`✓ ${queue.length} événement(s) synchronisés`);
+  } catch (e) {
+    if (manual) toast('Échec sync : ' + e.message, true);
+  } finally {
+    syncing = false;
+    updateSyncDot();
+    if (currentView === 'settings') renderSettings();
+  }
+}
+
+// ========== EXPORT / WIPE ==========
+async function exportData() {
+  const bags = await dbAll('bags');
+  const data = { regions, bags, settings: { deviceName: settings.deviceName }, exportedAt: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'sactrack-export-' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function confirmWipe() {
+  if (confirm('Effacer TOUS les sacs ? Les régions et la queue de sync sont conservées.')) {
+    await dbClear('bags');
+    toast('Données effacées');
+    render();
+  }
+}
+
+// ========== TOAST ==========
+let toastTimer;
+function toast(msg, isError = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.toggle('error', isError);
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+init();
+</script>
+</body>
+</html>
