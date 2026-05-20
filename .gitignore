@@ -1,0 +1,9 @@
+# Archives de déploiement
+*.zip
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
+# Dossiers locaux non utilisés
+bag_tracker/

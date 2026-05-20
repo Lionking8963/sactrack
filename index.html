@@ -45,6 +45,8 @@
   .bag-card.selected { box-shadow: 0 0 0 3px #22c55e; }
   .bag-card.selected .check { background: #22c55e; }
   .bag-card.selected .check::after { content: '✓'; color: white; font-size: 16px; }
+  .bag-card .sim { position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,0.7); color: white; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 8px; }
+  .bag-card .sim.high { background: rgba(34,197,94,0.9); }
 
   /* Bouton flottant */
   .fab { position: fixed; bottom: 20px; right: 20px; width: 64px; height: 64px; border-radius: 50%; background: #22c55e; color: white; border: none; font-size: 28px; font-weight: bold; box-shadow: 0 6px 16px rgba(0,0,0,0.4); cursor: pointer; }
@@ -123,8 +125,9 @@
   </header>
 
   <nav>
-    <button data-view="load" class="active">📥 Chargement</button>
-    <button data-view="unload">📤 Déchargement</button>
+    <button data-view="load" class="active">📥 Charger</button>
+    <button data-view="unload">📤 Décharger</button>
+    <button data-view="search">🔍 Chercher</button>
     <button data-view="settings">⚙️</button>
   </nav>
 
@@ -139,6 +142,19 @@
       <div class="empty" id="bags-empty" style="display:none;">
         <h3>Aucun sac</h3>
         <p>Sélectionne une région ou ajoute des sacs en mode Chargement</p>
+      </div>
+    </section>
+
+    <section id="view-search" class="view">
+      <button class="btn-primary full-btn" style="margin-bottom:14px;" onclick="startSearchCapture()">📷 Photographier un sac à rechercher</button>
+      <div id="search-query" style="display:none;text-align:center;margin-bottom:14px;">
+        <img id="search-query-img" style="max-height:170px;border-radius:10px;border:2px solid #3b82f6;">
+        <div style="color:#94a3b8;font-size:13px;margin-top:6px;">Sacs enregistrés les plus ressemblants</div>
+      </div>
+      <div class="bags-grid" id="search-results"></div>
+      <div class="empty" id="search-empty">
+        <h3>Recherche visuelle</h3>
+        <p>Prends un sac en photo : l'app retrouve les sacs déjà enregistrés qui lui ressemblent le plus (couleur + forme). 100% hors ligne.</p>
       </div>
     </section>
 
@@ -203,6 +219,8 @@
     <input type="text" id="region-name" placeholder="ex. Paris">
     <label>Couleur</label>
     <div class="color-grid" id="color-grid"></div>
+    <label>Couleur personnalisée</label>
+    <input type="color" id="region-color-custom" oninput="pickColorCustom(this.value)" style="width:100%;height:46px;padding:2px;border:1px solid #334155;border-radius:8px;background:#0f172a;cursor:pointer;">
     <div class="modal-actions">
       <button class="btn-secondary" onclick="closeRegionModal()">Annuler</button>
       <button class="btn-danger" id="region-delete-btn" style="display:none;" onclick="deleteRegion()">Suppr.</button>
@@ -283,6 +301,11 @@ let captureActiveRegionId = null;
 let captureLabelMode = false;
 let captureSessionCount = 0;
 let lastBagIdForLabel = null;
+let capturePurpose = 'load'; // 'load' | 'search'
+
+// Recherche visuelle
+let searchResults = [];
+let lastSearchQueryPhoto = null;
 
 // Sync
 let settings = { webhookUrl: '', deviceName: 'Tel-1', lastSyncAt: null };
@@ -340,6 +363,7 @@ async function render() {
   updateSyncDot();
   if (currentView === 'load') await renderLoad();
   else if (currentView === 'unload') await renderUnload();
+  else if (currentView === 'search') renderSearchResults();
   else if (currentView === 'settings') await renderSettings();
 }
 
@@ -442,11 +466,31 @@ async function updateSyncDot() {
 
 // ========== CAPTURE EN CONTINU ==========
 async function startCapture(regionId) {
+  capturePurpose = 'load';
   captureActiveRegionId = regionId;
   captureLabelMode = false;
   captureSessionCount = 0;
   lastBagIdForLabel = null;
+  document.getElementById('capture-region-strip').style.display = 'flex';
+  document.getElementById('session-counter').style.visibility = 'visible';
   updateCaptureUI();
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 1280 } },
+      audio: false
+    });
+    document.getElementById('video').srcObject = stream;
+    document.getElementById('capture-view').classList.add('show');
+  } catch (e) {
+    toast('Caméra indisponible : ' + e.message, true);
+  }
+}
+
+async function startSearchCapture() {
+  capturePurpose = 'search';
+  document.getElementById('capture-region-strip').style.display = 'none';
+  document.getElementById('label-toggle').style.display = 'none';
+  document.getElementById('session-counter').textContent = '🔍 Photographier le sac à rechercher';
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 1280 } },
@@ -488,7 +532,11 @@ function cancelCapture() {
   if (stream) stream.getTracks().forEach(t => t.stop());
   document.getElementById('capture-view').classList.remove('show');
   stream = null;
-  if (captureSessionCount > 0) toast(`Session : ${captureSessionCount} sac(s) ajouté(s)`);
+  if (capturePurpose === 'load' && captureSessionCount > 0) toast(`Session : ${captureSessionCount} sac(s) ajouté(s)`);
+  // restaurer l'UI de capture pour la prochaine fois
+  document.getElementById('capture-region-strip').style.display = 'flex';
+  document.getElementById('label-toggle').style.display = '';
+  capturePurpose = 'load';
   render();
 }
 
@@ -514,6 +562,16 @@ async function takePhoto() {
   // vibration courte si supportée
   if (navigator.vibrate) navigator.vibrate(40);
 
+  // --- MODE RECHERCHE ---
+  if (capturePurpose === 'search') {
+    cancelCapture();
+    toast('Analyse en cours...');
+    const qf = await computeFeatures(dataUrl);
+    lastSearchQueryPhoto = dataUrl;
+    await runSearch(qf);
+    return;
+  }
+
   if (captureLabelMode && lastBagIdForLabel) {
     const bag = await dbGet('bags', lastBagIdForLabel);
     if (bag) {
@@ -524,12 +582,14 @@ async function takePhoto() {
     captureLabelMode = false;
     updateCaptureUI();
   } else {
+    const features = await computeFeatures(dataUrl);
     const bag = {
       regionId: captureActiveRegionId,
       photo: dataUrl,
       labelPhoto: null,
       createdAt: Date.now(),
-      device: settings.deviceName || 'unknown'
+      device: settings.deviceName || 'unknown',
+      features: features
     };
     const id = await dbAdd('bags', bag);
     bag.id = id;
@@ -539,6 +599,103 @@ async function takePhoto() {
     updateCaptureUI();
   }
   flushQueue(false);
+}
+
+// ========== RECHERCHE VISUELLE (100% offline) ==========
+function loadImage(src) {
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+}
+
+// Empreinte : dHash 8x8 (forme/contraste) + signature couleur 4x4
+async function computeFeatures(dataUrl) {
+  const img = await loadImage(dataUrl);
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+
+  // dHash : redimensionne en 9x8 niveaux de gris, compare pixels adjacents
+  c.width = 9; c.height = 8;
+  ctx.drawImage(img, 0, 0, 9, 8);
+  const d = ctx.getImageData(0, 0, 9, 8).data;
+  let hash = '';
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      const i1 = (y * 9 + x) * 4, i2 = (y * 9 + x + 1) * 4;
+      const g1 = d[i1] * 0.299 + d[i1 + 1] * 0.587 + d[i1 + 2] * 0.114;
+      const g2 = d[i2] * 0.299 + d[i2 + 1] * 0.587 + d[i2 + 2] * 0.114;
+      hash += g1 > g2 ? '1' : '0';
+    }
+  }
+
+  // Signature couleur : 4x4 = 16 cellules RGB
+  c.width = 4; c.height = 4;
+  ctx.drawImage(img, 0, 0, 4, 4);
+  const cd = ctx.getImageData(0, 0, 4, 4).data;
+  const color = [];
+  for (let i = 0; i < 16; i++) { color.push(cd[i * 4], cd[i * 4 + 1], cd[i * 4 + 2]); }
+
+  return { hash, color };
+}
+
+function hamming(a, b) { let n = 0; const len = Math.min(a.length, b.length); for (let i = 0; i < len; i++) if (a[i] !== b[i]) n++; return n; }
+function colorDist(a, b) { let s = 0; const len = Math.min(a.length, b.length); for (let i = 0; i < len; i++) { const x = a[i] - b[i]; s += x * x; } return Math.sqrt(s); }
+
+function similarity(qf, bf) {
+  if (!qf || !bf || !qf.hash || !bf.hash) return 0;
+  const hN = hamming(qf.hash, bf.hash) / 64;          // 0 (identique) .. 1
+  const cN = Math.min(1, colorDist(qf.color, bf.color) / 700); // ~0 .. 1
+  const dist = hN * 0.6 + cN * 0.4;
+  return Math.max(0, Math.round((1 - dist) * 100));
+}
+
+// Calcule l'empreinte des anciens sacs (sans features) et la sauvegarde
+async function ensureFeatures(bag) {
+  if (bag.features && bag.features.hash) return bag.features;
+  try {
+    const f = await computeFeatures(bag.photo);
+    bag.features = f;
+    await dbPut('bags', bag);
+    return f;
+  } catch (e) { return null; }
+}
+
+async function runSearch(queryFeatures) {
+  const bags = await dbAll('bags');
+  const scored = [];
+  for (const b of bags) {
+    const f = await ensureFeatures(b);
+    if (f) scored.push({ bag: b, score: similarity(queryFeatures, f) });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  searchResults = scored.slice(0, 30);
+  switchView('search');
+  renderSearchResults();
+}
+
+function renderSearchResults() {
+  const wrap = document.getElementById('search-results');
+  const empty = document.getElementById('search-empty');
+  const q = document.getElementById('search-query');
+  if (lastSearchQueryPhoto) {
+    document.getElementById('search-query-img').src = lastSearchQueryPhoto;
+    q.style.display = 'block';
+  } else {
+    q.style.display = 'none';
+  }
+  wrap.innerHTML = '';
+  if (!searchResults.length) {
+    empty.style.display = 'block';
+    empty.querySelector('h3').textContent = lastSearchQueryPhoto ? 'Aucun sac enregistré' : 'Recherche visuelle';
+    return;
+  }
+  empty.style.display = 'none';
+  for (const r of searchResults) {
+    const region = regions.find(x => x.id === r.bag.regionId);
+    const card = document.createElement('div');
+    card.className = 'bag-card';
+    card.innerHTML = `<img src="${r.bag.photo}" alt=""><div class="region-dot" style="background:${region ? region.color : '#64748b'}"></div><div class="sim ${r.score >= 75 ? 'high' : ''}">${r.score}%</div>`;
+    card.onclick = () => openBagDetail(r.bag.id);
+    wrap.appendChild(card);
+  }
 }
 
 // ========== DÉCHARGEMENT ==========
@@ -614,7 +771,14 @@ function openRegionModal(id = null) {
     document.getElementById('region-delete-btn').style.display = 'none';
   }
   document.querySelectorAll('.color-swatch').forEach(s => { if (s.dataset.color === pickedColor) s.classList.add('selected'); });
+  document.getElementById('region-color-custom').value = /^#[0-9a-fA-F]{6}$/.test(pickedColor) ? pickedColor : '#3b82f6';
   document.getElementById('region-modal').classList.add('show');
+}
+
+function pickColorCustom(v) {
+  pickedColor = v;
+  document.querySelectorAll('.color-swatch').forEach(x => x.classList.remove('selected'));
+  document.querySelectorAll('.color-swatch').forEach(s => { if (s.dataset.color === v) s.classList.add('selected'); });
 }
 function closeRegionModal() { document.getElementById('region-modal').classList.remove('show'); editingRegionId = null; }
 async function saveRegion() {

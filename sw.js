@@ -1,5 +1,5 @@
 // Service worker — fonctionnement hors ligne
-const CACHE = 'sactrack-v1';
+const CACHE = 'sactrack-v3';
 const ASSETS = [
   './',
   './index.html',
